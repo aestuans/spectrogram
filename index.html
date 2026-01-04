@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>spectrogram</title>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        :root {
+            --ui-white: #c7c7c7;
+            --ui-black: #000000;
+            --ui-overlay: rgba(0, 0, 0, 0.82);
+            --ui-pill: rgba(0, 0, 0, 0.5);
+
+            --viewport-h: 100vh;
+            --side-pad: clamp(6px, 2.8vw, 26px);
+            --safe-bottom: env(safe-area-inset-bottom);
+            --controls-pad-y: 10px;
+            --controls-pad-x: 16px;
+
+            --btn-size-idle: clamp(96px, 16vw, 140px);
+            --icon-size-idle: clamp(34px, 8vw, 100px);
+            --btn-size-active: clamp(64px, 8vh, 140px);
+            --icon-size-active: clamp(28px, 4vh, 44px);
+
+            --bottom-gap: max(10vh,
+                    calc(var(--btn-size-active) + var(--controls-pad-y) * 2 + 12px));
+            --reserved-gap: calc(var(--bottom-gap) + var(--safe-bottom));
+
+            --controls-gap: 18px;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--ui-black);
+        }
+
+        body {
+            height: var(--viewport-h);
+            padding: 0 var(--side-pad);
+            overflow: hidden;
+            font-family: "Space Grotesk", "Futura", sans-serif;
+        }
+
+        @media (min-width: 1000px) {
+            :root {
+                --side-pad: 15vw;
+            }
+        }
+
+        #canvas-shell {
+            height: calc(var(--viewport-h) - var(--reserved-gap));
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #source-shell {
+            position: fixed;
+            inset: 0;
+            padding: 0 var(--side-pad);
+            background: var(--ui-overlay);
+            transition: background 200ms ease;
+            --btn-size-current: var(--btn-size-idle);
+            --icon-size-current: var(--icon-size-idle);
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #source-shell[data-state="active"] {
+            background: transparent;
+            --btn-size-current: var(--btn-size-active);
+            --icon-size-current: var(--icon-size-active);
+        }
+
+        #source-controls {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            gap: var(--controls-gap);
+            transition: top 320ms ease, background 240ms ease, padding 240ms ease,
+                border-color 240ms ease;
+            pointer-events: auto;
+            will-change: top;
+        }
+
+        #source-shell[data-state="active"] #source-controls {
+            top: calc(100% - var(--safe-bottom) - (var(--bottom-gap) / 2));
+            padding: var(--controls-pad-y) var(--controls-pad-x);
+            border-radius: 999px;
+            background: var(--ui-pill);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+
+        .source-btn {
+            width: var(--btn-size-current);
+            height: var(--btn-size-current);
+            border-radius: 50%;
+            border: 3px solid var(--ui-white);
+            background: rgba(29, 29, 29, 0.5);
+            color: var(--ui-white);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: width 280ms ease, height 280ms ease, background 200ms ease,
+                color 200ms ease, border-color 200ms ease;
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+        }
+
+        .source-btn svg {
+            width: var(--icon-size-current);
+            height: var(--icon-size-current);
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.0;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            vector-effect: non-scaling-stroke;
+            transition: width 280ms ease, height 280ms ease;
+        }
+
+        #source-music .icon-next {
+            display: none;
+        }
+
+        #source-music[data-mode="next"] .icon-next {
+            display: block;
+        }
+
+        #source-music[data-mode="next"] .icon-play {
+            display: none;
+        }
+
+        .source-btn[aria-pressed="true"] {
+            background: var(--ui-white);
+            color: var(--ui-black);
+            border-color: var(--ui-white);
+        }
+
+        .source-btn:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+
+        #source-shell[data-loading="true"] .source-btn {
+            display: none;
+        }
+
+        #source-shell[data-loading="true"] #loading-indicator {
+            display: inline-flex;
+        }
+
+        #loading-indicator {
+            width: var(--btn-size-current);
+            height: var(--btn-size-current);
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            border-top-color: var(--ui-white);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            animation: spin 900ms linear infinite;
+        }
+
+        .visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        .source-btn:focus-visible {
+            outline: 2px solid var(--ui-white);
+            outline-offset: 4px;
+        }
+
+        #footer-links {
+            position: absolute;
+            right: var(--side-pad);
+            top: calc(100% - var(--safe-bottom) - (var(--bottom-gap) / 2));
+            transform: translateY(-50%);
+            z-index: 30;
+            font-size: 14px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.82);
+            text-align: center;
+            user-select: none;
+            display: none;
+            pointer-events: auto;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #footer-links a {
+            display: block;
+            padding: 4px 6px;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        #footer-links hr {
+            width: 56px;
+            margin: 0 auto;
+            border: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.35);
+        }
+
+        #source-shell[data-state="active"] #footer-links {
+            display: flex;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="canvas-shell">
+        <canvas id="canvas"></canvas>
+    </div>
+    <div id="source-shell" data-state="idle">
+        <div id="source-controls">
+            <!-- Icons: Lucide -->
+            <button id="source-mic" class="source-btn" aria-pressed="false" aria-label="Use microphone"
+                title="Microphone">
+                <svg class="lucide lucide-mic" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                    aria-hidden="true">
+                    <path d="M12 19v3" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <rect x="9" y="2" width="6" height="13" rx="3" />
+                </svg>
+            </button>
+            <button id="source-music" class="source-btn" data-mode="play" aria-pressed="false"
+                aria-label="Play sample music" title="Music">
+                <svg class="icon-play lucide lucide-music2-icon lucide-music-2" xmlns="http://www.w3.org/2000/svg"
+                    width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="8" cy="18" r="4" />
+                    <path d="M12 18V2l7 4" />
+                </svg>
+                <svg class="icon-next lucide lucide-skip-forward" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                    aria-hidden="true">
+                    <path d="M5 4l10 8-10 8V4z" />
+                    <line x1="19" y1="5" x2="19" y2="19" />
+                </svg>
+            </button>
+            <div id="loading-indicator" role="status" aria-live="polite">
+                <span class="visually-hidden">Loading</span>
+            </div>
+        </div>
+        <div id="footer-links">
+            <a href="https://github.com/" target="_blank" rel="noreferrer">Source</a>
+            <hr>
+            <a href="music-credits.html">Music Credits</a>
+        </div>
+    </div>
+    <script type="module">
+        import init, { start_microphone, start_music_with_url, resize_canvas } from './dist/spectrogram.js';
+
+        const shell = document.getElementById('source-shell');
+        const micButton = document.getElementById('source-mic');
+        const musicButton = document.getElementById('source-music');
+        const root = document.documentElement;
+
+        const musicTracks = [
+            'assets/Also-Sprach-Zarathustra-PM-Music.mp3',
+            'assets/Bach-Cello-Suite-No.-1-G-Major-PM-Music.mp3',
+            'assets/Blue-Danube-PM-Music.mp3',
+            'assets/The-Flower-Duet-PM-Music.mp3',
+            'assets/Winter-Vivaldi-PM-Music.mp3',
+        ];
+
+        let active = null;
+        let busy = false;
+        let hasActivated = false;
+        let trackIndex = 0;
+        let wasmReady = false;
+        let loadingTimer = null;
+
+        const LOADING_DELAY_MS = 200;
+
+        const showLoadingAfterDelay = () => {
+            if (loadingTimer || shell.dataset.loading === 'true') {
+                return;
+            }
+            loadingTimer = window.setTimeout(() => {
+                loadingTimer = null;
+                shell.dataset.loading = 'true';
+            }, LOADING_DELAY_MS);
+        };
+
+        const hideLoading = () => {
+            if (loadingTimer) {
+                window.clearTimeout(loadingTimer);
+                loadingTimer = null;
+            }
+            shell.dataset.loading = 'false';
+        };
+
+        const setPressed = (button, pressed) => {
+            button.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+        };
+
+        const updateViewport = () => {
+            const viewportH =
+                (window.visualViewport && window.visualViewport.height) || window.innerHeight || 0;
+            root.style.setProperty('--viewport-h', `${viewportH}px`);
+            if (wasmReady) {
+                try {
+                    resize_canvas();
+                } catch (err) {
+                    console.warn('Canvas resize failed.', err);
+                }
+            }
+        };
+
+        const setUIState = (kind) => {
+            if (kind) {
+                hasActivated = true;
+            }
+
+            setPressed(micButton, kind === 'mic');
+            setPressed(musicButton, kind === 'music');
+
+            shell.dataset.state = hasActivated ? 'active' : 'idle';
+            const musicMode = kind === 'music' ? 'next' : 'play';
+            musicButton.dataset.mode = musicMode;
+            const label = musicMode === 'next' ? 'Next track' : 'Play sample music';
+            musicButton.setAttribute('aria-label', label);
+            musicButton.title = musicMode === 'next' ? 'Next' : 'Music';
+        };
+
+        const startMusic = async (index) => {
+            if (busy) {
+                return;
+            }
+
+            const resetUi = active !== 'music';
+            busy = true;
+            showLoadingAfterDelay();
+            if (resetUi) {
+                setUIState(null);
+            }
+
+            try {
+                await start_music_with_url(musicTracks[index]);
+                trackIndex = index;
+                active = 'music';
+                setUIState('music');
+            } catch (err) {
+                console.warn('Music playback failed');
+                console.warn(err);
+                active = null;
+                setUIState(null);
+            } finally {
+                hideLoading();
+                busy = false;
+            }
+        };
+
+        const handleClick = async (kind) => {
+            if (busy) {
+                return;
+            }
+
+            if (kind === 'mic' && active === 'mic') {
+                return;
+            }
+
+            try {
+                if (kind === 'music') {
+                    if (active === 'music') {
+                        window.nextTrack();
+                    }
+                    else {
+                        await startMusic(Math.floor(Math.random() * musicTracks.length));
+                    }
+                } else {
+                    busy = true;
+                    showLoadingAfterDelay();
+                    setUIState(null);
+                    await start_microphone();
+                    active = 'mic';
+                    setUIState('mic');
+                }
+            } catch (err) {
+                const message =
+                    kind === 'mic'
+                        ? 'Microphone access failed'
+                        : 'Music playback failed';
+                console.warn(message);
+                console.warn(err);
+                active = null;
+                setUIState(null);
+            } finally {
+                if (kind === 'mic') {
+                    hideLoading();
+                    busy = false;
+                }
+            }
+        };
+
+        const initApp = async () => {
+            updateViewport();
+            showLoadingAfterDelay();
+            try {
+                await init();
+                wasmReady = true;
+                updateViewport();
+            } catch (err) {
+                console.warn('Failed to initialize the spectrogram.');
+                console.warn(err);
+                hideLoading();
+                return;
+            }
+            hideLoading();
+
+            micButton.addEventListener('click', () => handleClick('mic'));
+            musicButton.addEventListener('click', () => handleClick('music'));
+
+            const viewport = window.visualViewport;
+            if (viewport) {
+                viewport.addEventListener('resize', updateViewport);
+                viewport.addEventListener('scroll', updateViewport);
+            } else {
+                window.addEventListener('resize', updateViewport);
+            }
+        };
+
+        window.nextTrack = () => {
+            if (active !== 'music' || busy) {
+                return;
+            }
+            startMusic((((trackIndex + 1) % musicTracks.length) + musicTracks.length) % musicTracks.length);
+        };
+
+        initApp();
+    </script>
+</body>
+
+</html>
